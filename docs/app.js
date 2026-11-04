@@ -15,6 +15,7 @@ const T0 = performance.timeOrigin || (Date.now() - performance.now());
 const nowMs = () => T0 + performance.now();
 const evMs = (e) => (e && e.timeStamp ? T0 + e.timeStamp : nowMs());
 const r3 = (v) => (v == null || Number.isNaN(v) ? null : Math.round(v * 1000) / 1000);
+const r5 = (v) => (v == null || !isFinite(v) ? v : Math.round(v * 1e5) / 1e5);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const PAGE = document.body.dataset.page || "main"; // "main" (index.html) or "drag" (drag.html)
 const SID = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2)).slice(0, 8);
@@ -285,8 +286,21 @@ const wrist = {
       const q = this.s.quaternion; if (!q) return;
       this.n++;
       const [w, x, y, z] = q;
-      const it = { s: "nb_wrist", ts: r3(this.s.timestamp ? T0 + this.s.timestamp : nowMs()), qw: r3(w), qx: r3(x), qy: r3(y), qz: r3(z),
+      const ts = this.s.timestamp ? T0 + this.s.timestamp : nowMs();
+      const it = { s: "nb_wrist", ts: r3(ts), qw: r5(w), qx: r5(x), qy: r5(y), qz: r5(z), // 5 dp: 3 dp adds ~4 deg/s noise to rates derived offline
         twist: r3((2 * Math.atan2(y, w) * 180) / Math.PI) }; // roll about the forearm (+Y) axis, degrees
+      // The band exposes no raw gyro to Web Apps. Derive angular velocity in the wrist frame from consecutive
+      // quaternions: dq = conj(q_prev) * q, omega = 2 * vec(dq) / dt (deg/s). Samples arrive ~30 ms apart.
+      const p = this.prevQ, dt = p ? (ts - p.ts) / 1000 : 0;
+      if (p && dt > 0.002 && dt < 0.25) {
+        let [pw, px, py, pz] = p.q;
+        if (pw * w + px * x + py * y + pz * z < 0) { pw = -pw; px = -px; py = -py; pz = -pz; } // same hemisphere
+        const dw = pw * w + px * x + py * y + pz * z;
+        const dx = pw * x - px * w - py * z + pz * y, dy = pw * y + px * z - py * w - pz * x, dz = pw * z - px * y + py * x - pz * w;
+        const k = (2 * Math.atan2(Math.hypot(dx, dy, dz), dw) / Math.max(1e-9, Math.hypot(dx, dy, dz))) * (180 / Math.PI) / dt;
+        it.wx = r3(dx * k); it.wy = r3(dy * k); it.wz = r3(dz * k); it.dt_ms = r3(dt * 1000);
+      }
+      this.prevQ = { ts, q: [w, x, y, z] };
       net.push(it); this.last = it; bus.emit("nb_wrist", it);
     };
     this.s.onerror = (e) => {
@@ -616,7 +630,7 @@ screens.live = {
     c.fillText(`hdg ${hdg == null ? "–" : hdg.toFixed(0) + "°"} ${abs.abs ? "abs" : "rel"}`, 410, 478);
     const g = live.geo;
     const wl = wrist.last;
-    $("live-last").textContent = `${live.lastInput} · ${wl ? `wrist ${wl.twist.toFixed(0)}°` : "wrist " + wrist.state} · ${g ? `${g.lat.toFixed(4)},${g.lon.toFixed(4)} ±${Math.round(g.acc)}m` : "no GPS"}`;
+    $("live-last").textContent = `${live.lastInput} · ${wl ? `wrist ${wl.twist.toFixed(0)}°${wl.wx != null ? ` ${Math.hypot(wl.wx, wl.wy, wl.wz).toFixed(0)}°/s` : ""}` : "wrist " + wrist.state} · ${g ? `${g.lat.toFixed(4)},${g.lon.toFixed(4)} ±${Math.round(g.acc)}m` : "no GPS"}`;
     requestAnimationFrame(() => this.draw());
   },
 };

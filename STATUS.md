@@ -41,6 +41,18 @@ Glasses: Meta RB Display, fw build 69951180085500080 (SDK reports COMPATIBLE). P
 - Web App on the glasses still loads the old build from GitHub Pages (tile ids `drag`/`neural`); the pinch fix only
   takes effect after a push.
 
+- 15:56–16:09: every session start failed. The SDK's log line shows `START_ERROR_DAT_APP_ON_THE_GLASSES_UPDATE_REQUIRED`
+  (20/20), but apps only get SESSION_ENDED_BY_DEVICE. The glasses DAT app seems to reset after re-registering. The app
+  now reads its own log for the real code (`dat_error cap=session.start`) and shows the update banner.
+
+## Third run (recordings/2026-11-04_16-13-03, 16-00-49, 16-03-42)
+- DAT Inputs with all sources: NEURAL_BAND nav U/D/L/R + select, and NEURAL_BAND_DRAG (29 drags, 447 MOVE samples).
+  Drag = pinch-and-hold then move the hand: DOWN at (0,0), MOVE ~30 Hz with x,y = displacement from the pinch point
+  (seen about ±0.18 units), dx,dy = per-sample delta, UP on release. A pinch-joystick driven by the band, not a touch.
+- DAT Motion: 11,588 samples, all GLASSES. The band's IMU is not delivered to DAT on this firmware.
+- Web: `emg-wrist` quaternion works, ~32 Hz (p50 dt 30 ms), nb_wrist test pass (98 deg twist span). No raw band
+  gyro/accel in either API; app.js now derives wrist angular velocity (wx,wy,wz deg/s) and stores quaternions at 5 dp.
+
 Neural Band inputs available (per SDK 1.0.1 + Web Apps docs):
 - DAT: Nav UP/DOWN/LEFT/RIGHT, Select, Back (source NEURAL_BAND), Drag DOWN/MOVE/UP with x,y,dx,dy
   (NEURAL_BAND_DRAG), display button onClick; Motion source enum has NEURAL_BAND (not observed yet).

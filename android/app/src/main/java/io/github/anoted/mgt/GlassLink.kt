@@ -239,8 +239,34 @@ object GlassLink {
   }
 
   /** Each version error means something different; see the DAT "Version Dependencies" guide. */
+  @Volatile private var sessionEverStarted = false
+
+  /** The SDK reports a start-time rejection to apps only as SESSION_ENDED_BY_DEVICE; the real reason is in its own
+   *  log line "DAT:CORE:DATSession: Session channel error: START_ERROR_<CODE>". An app may read its own process log. */
+  private fun lastSessionChannelError(): String? = try {
+    val p = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-t", "400", "--pid=${android.os.Process.myPid()}"))
+    val txt = p.inputStream.bufferedReader().readText(); p.waitFor()
+    Regex("Session channel error: (\\w+)").findAll(txt).lastOrNull()?.groupValues?.get(1)
+  } catch (t: Throwable) { null }
+
+  private fun onEndedBeforeStart() {
+    scope.launch(Dispatchers.IO) {
+      delay(150)
+      val raw = lastSessionChannelError()
+      val code = raw?.removePrefix("START_ERROR_")
+      item("dat_error", JSONObject().put("cap", "session.start").put("code", code ?: "UNKNOWN").put("raw", raw ?: ""))
+      log("glasses rejected the session before it started: ${raw ?: "reason not logged"}")
+      val known = DeviceSessionError.entries.firstOrNull { it.name == code }
+      if (known != null && known != DeviceSessionError.SESSION_ENDED_BY_DEVICE) { onSessionError(known); return@launch }
+      if (action.value == null) action.value = Action(Fix.DAT_APP_UPDATE,
+          "The glasses ended the session before it started${raw?.let { " ($it)" } ?: ""}. This is usually the DAT app ON THE GLASSES " +
+              "needing an update or reinstall (it can reset after re-registering). Tap \"Update DAT app on glasses\", keep the glasses on and charged, then retry.")
+    }
+  }
+
   private fun onSessionError(e: DeviceSessionError) {
     item("dat_error", JSONObject().put("cap", "session").put("code", e.name).put("error", e.description))
+    if (e == DeviceSessionError.SESSION_ENDED_BY_DEVICE && !sessionEverStarted) onEndedBeforeStart()
     states.value = states.value + ("session error" to e.name)
     log("session error ${e.name}: ${e.description}")
     when (e) {
@@ -263,10 +289,11 @@ object GlassLink {
     Wearables.createSession(AutoDeviceSelector()).fold(
         onSuccess = { s ->
           session = s
+          sessionEverStarted = false
           jobs["session.state"] = scope.launch {
             s.state.collect { st ->
               setState("session", st.name)
-              if (st == DeviceSessionState.STARTED) { if (action.value?.fix == Fix.DAT_APP_UPDATE) action.value = null; onSessionStarted(s) }
+              if (st == DeviceSessionState.STARTED) { sessionEverStarted = true; if (action.value?.fix == Fix.DAT_APP_UPDATE) action.value = null; onSessionStarted(s) }
               if (st == DeviceSessionState.STOPPED) cleanupSession()
             }
           }
