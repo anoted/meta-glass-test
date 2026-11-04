@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=600, height=600, initial-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="mrbd-web-app-capable" content="yes">
 <meta name="description" content="Sensor Suite: tests and streams every sensor and input on Meta Ray-Ban Display + Neural Band to a recorder PC.">
 <title>Sensor Suite</title>
@@ -14,7 +14,7 @@
 <link href="https://fonts.googleapis.com/css2?family=STIX+Two+Text:wght@400;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="app.css">
 </head>
-<body>
+<body data-page="main">
 <header id="bar">
   <span id="link-dot" class="dot"></span>
   <span id="link-txt">offline</span>
@@ -33,7 +33,7 @@
       <button class="tile" data-go="tests"><b>Run test suite</b><small>all sensors, guided</small></button>
       <button class="tile" data-go="neural"><b>Neural Band</b><small>gesture accuracy · latency</small></button>
       <button class="tile" data-go="live"><b>Live sensors</b><small>IMU · horizon · compass</small></button>
-      <button class="tile" data-go="drag"><b>Drag pad</b><small>pinch-and-drag trail</small></button>
+      <button class="tile" data-act="dragpage"><b>Drag pad</b><small>pinch-and-drag trail</small></button>
       <button class="tile" data-go="setup"><b>Setup</b><small>server · text input · camera</small></button>
     </div>
     <p id="home-msg" class="hint">Swipe to move · pinch to select · Back to exit</p>

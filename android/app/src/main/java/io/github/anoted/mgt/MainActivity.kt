@@ -48,6 +48,9 @@ class MainActivity : ComponentActivity() {
   private lateinit var root: LinearLayout
   private lateinit var tUplink: TextView
   private lateinit var tReg: TextView
+  private lateinit var actionBox: LinearLayout
+  private lateinit var tAction: TextView
+  private lateinit var bAction: Button
   private lateinit var tStates: TextView
   private lateinit var tDevice: TextView
   private lateinit var tRates: TextView
@@ -94,20 +97,32 @@ class MainActivity : ComponentActivity() {
     lifecycleScope.launch { refreshLoop() }
   }
 
-  /** metaglasstest://config?server=…&key=… (from the dashboard QR code), otherwise a DAT registration callback. */
+  /** metaglasstest://config?server=…&key=… (from the dashboard QR code); every other intent goes to DAT first. */
   private fun handleLink(i: Intent?) {
-    val u: Uri = i?.data ?: return
-    if (u.host == "config") {
+    i ?: return
+    val u: Uri? = i.data
+    if (u?.scheme == "metaglasstest" && u.host == "config") {
       val s = u.getQueryParameter("server") ?: return
       val k = u.getQueryParameter("key") ?: ""
       GlassLink.saveConfig(s, k)
       eServer.setText(s); eKey.setText(k)
       toast("Recorder set to $s")
-    } else {
-      Wearables.handleIntent(i) { req -> req.continueRegistration(this) }
-          .onFailure { e, _ -> GlassLink.log("registration callback: $e") }
+      i.data = null
+      return
     }
+    // Meta AI can start registration with an intent that has no data URI, so this must run unconditionally
+    // (it only reacts to registration intents and ignores everything else).
+    Wearables.handleIntent(i) { req -> req.continueRegistration(this) }
+        .onFailure { e, _ -> GlassLink.log("registration intent: $e") }
     i.data = null
+  }
+
+  private fun fix(f: GlassLink.Fix) {
+    val r = when (f) {
+      GlassLink.Fix.DAT_APP_UPDATE -> Wearables.openDATGlassesAppUpdate(this)
+      GlassLink.Fix.FIRMWARE_UPDATE -> Wearables.openFirmwareUpdate(this)
+    }
+    r.onFailure { e, _ -> toast("Could not open Meta AI: $e"); GlassLink.log("open ${f.name}: $e") }
   }
 
   // --------------------------------------------------------------------- UI
@@ -129,11 +144,22 @@ class MainActivity : ComponentActivity() {
         button("Reconnect") { GlassLink.uplink.reconnect() }))
     tUplink = mono(); root.addView(tUplink)
 
+    actionBox = LinearLayout(this).apply {
+      orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(10), dp(12), dp(10)); visibility = View.GONE
+      background = GradientDrawable().apply { setColor(Color.parseColor("#FFF4E5")); setStroke(dp(1), Color.parseColor("#C77700")); cornerRadius = dp(6).toFloat() }
+    }
+    tAction = text("", 15f, serif); bAction = button("Fix") {}
+    actionBox.addView(tAction); actionBox.addView(bAction)
+    root.addView(actionBox, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) })
+
     section("Meta AI registration & permissions")
     tReg = text("", 15f, serif); root.addView(tReg)
     root.addView(row(button("Register") { Wearables.startRegistration(this) }, button("Unregister") { Wearables.startUnregistration(this) }))
     root.addView(row(button("Camera permission") { datPermLauncher.launch(Permission.CAMERA) },
         button("Mic permission") { datPermLauncher.launch(Permission.MICROPHONE) }))
+    root.addView(row(button("Update DAT app on glasses") { fix(GlassLink.Fix.DAT_APP_UPDATE) },
+        button("Glasses firmware") { fix(GlassLink.Fix.FIRMWARE_UPDATE) }))
+    root.addView(text("On the glasses touchpad during a session: one-finger tap pauses/resumes, tap-and-hold stops it.", 13f, serif, muted))
 
     section("Session & streams")
     bSession = button("Start session") { if (GlassLink.sessionActive() || GlassLink.states.value["session"] in setOf("STARTING", "CREATED")) GlassLink.stopSession() else GlassLink.startSession() }
@@ -147,6 +173,7 @@ class MainActivity : ComponentActivity() {
     root.addView(spinner("Motion rate (Hz)", listOf("5", "10", "15", "24", "30", "60"), w.motionRate.toString()) { GlassLink.setMotion(w.motion, it.toInt()) })
     root.addView(switch("Inputs (touchpad, buttons, Neural Band)", w.inputs) { GlassLink.setInputs(it) })
     root.addView(switch("Speech recognition", w.speech) { GlassLink.setSpeech(it) })
+    root.addView(switch("Status card on glasses display (hides the Web App)", w.display) { GlassLink.setDisplay(it) })
 
     section("Phone-side test suite")
     tPrompt = text("", 20f, serifB, accent).apply { gravity = Gravity.CENTER_HORIZONTAL; setPadding(0, dp(6), 0, dp(6)) }
@@ -172,6 +199,14 @@ class MainActivity : ComponentActivity() {
           "queue ${u.queueLength()} · dropped ${u.dropped.get()} · sent ${"%.1f".format(u.sentBytes.get() / 1e6)} MB"
       val reg = Wearables.registrationState.value
       tReg.text = "Registration: ${reg.name}" + if (reg != RegistrationState.REGISTERED) "  — open Meta AI → Developer Mode, then Register" else ""
+      val act = GlassLink.action.value
+      actionBox.visibility = if (act == null) View.GONE else View.VISIBLE
+      if (act != null) {
+        tAction.text = act.text
+        bAction.visibility = if (act.fix == null) View.GONE else View.VISIBLE
+        bAction.text = if (act.fix == GlassLink.Fix.FIRMWARE_UPDATE) "Open firmware update" else "Update DAT app on glasses"
+        bAction.setOnClickListener { act.fix?.let { fix(it) } }
+      }
       val st = GlassLink.states.value
       tStates.text = st.entries.sortedBy { it.key }.joinToString("\n") { "${it.key.padEnd(16)} ${it.value}" }.ifEmpty { "–" }
       tDevice.text = GlassLink.device.value.entries.joinToString("\n") { "${it.key.padEnd(9)} ${it.value}" }.ifEmpty { "no device yet" }

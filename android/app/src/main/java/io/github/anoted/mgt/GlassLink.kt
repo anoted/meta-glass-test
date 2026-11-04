@@ -18,9 +18,20 @@ import com.meta.wearable.dat.core.Wearables
 import com.meta.wearable.dat.core.selectors.AutoDeviceSelector
 import com.meta.wearable.dat.core.session.DeviceSession
 import com.meta.wearable.dat.core.session.DeviceSessionState
+import com.meta.wearable.dat.core.types.DeviceCompatibility
 import com.meta.wearable.dat.core.types.DeviceIdentifier
+import com.meta.wearable.dat.core.types.DeviceSessionError
+import com.meta.wearable.dat.core.types.DonState
 import com.meta.wearable.dat.core.types.Permission
 import com.meta.wearable.dat.core.types.PermissionStatus
+import com.meta.wearable.dat.display.Display
+import com.meta.wearable.dat.display.addDisplay
+import com.meta.wearable.dat.display.removeDisplay
+import com.meta.wearable.dat.display.types.DisplayConfiguration
+import com.meta.wearable.dat.display.types.DisplayState
+import com.meta.wearable.dat.display.views.Direction
+import com.meta.wearable.dat.display.views.TextColor
+import com.meta.wearable.dat.display.views.TextStyle
 import com.meta.wearable.dat.inputs.Inputs
 import com.meta.wearable.dat.inputs.addInputs
 import com.meta.wearable.dat.inputs.removeInputs
@@ -72,6 +83,7 @@ object GlassLink {
       var motionRate: Int = 60,
       var inputs: Boolean = true,
       var speech: Boolean = false,
+      var display: Boolean = true, // status view on the glasses (takes the display from the Web App while the session runs)
       var quality: String = "MEDIUM",
       var fps: Int = 24,
   )
@@ -84,6 +96,10 @@ object GlassLink {
   val logLines = MutableStateFlow<List<String>>(emptyList())
   val counters = MutableStateFlow<Map<String, Int>>(emptyMap())
   val permissionRequests = MutableSharedFlow<Permission>(extraBufferCapacity = 4)
+  /** Something only the user can fix in the Meta AI app; the UI shows it as a banner with a button. */
+  enum class Fix { DAT_APP_UPDATE, FIRMWARE_UPDATE }
+  data class Action(val fix: Fix?, val text: String)
+  val action = MutableStateFlow<Action?>(null)
 
   // ------------------------------------------------------------- live objects
   private var session: DeviceSession? = null
@@ -91,6 +107,9 @@ object GlassLink {
   private var motion: Motion? = null
   private var inputs: Inputs? = null
   private var speech: Speech? = null
+  private var display: Display? = null
+  private var lastDon: DonState? = null
+  @Volatile private var lastInputText = "–"
   private val jobs = HashMap<String, Job>()
   private val deviceJobs = HashMap<DeviceIdentifier, Job>()
   private val counts = HashMap<String, Int>()
@@ -166,6 +185,7 @@ object GlassLink {
       n++
       counters.value = HashMap(rateCounts); rateCounts.clear()
       if (vFrames > 0 || camera != null) {
+        vLastFps = vFrames
         item("dat_video_stat", JSONObject().put("fps", vFrames).put("kbps", vBytes * 8 / 1000.0).put("w", vW).put("h", vH).put("frames", vTotal))
         vFrames = 0; vBytes = 0
       }
@@ -196,9 +216,42 @@ object GlassLink {
             device.value = m
             val o = JSONObject(m as Map<*, *>); o.put("battery", d.batteryLevel)
             item("dat_device", o)
+            onCompatibility(d.compatibility)
+            // Known SDK issue: after doffing and donning with Wear Detection on, Inputs stop until re-added.
+            if (lastDon != null && lastDon != DonState.DONNED && d.donState == DonState.DONNED && wanted.inputs && session != null) {
+              log("glasses donned again: re-adding Inputs"); setInputs(true)
+            }
+            lastDon = d.donState
           }
         }
       }
+    }
+  }
+
+  private fun onCompatibility(c: DeviceCompatibility) {
+    when (c) {
+      // AutoDeviceSelector only picks COMPATIBLE devices, so these block every session.
+      DeviceCompatibility.DEVICE_UPDATE_REQUIRED -> action.value = Action(Fix.FIRMWARE_UPDATE, "The SDK reports the glasses firmware as too old for DAT 1.0.1 (needs v128+). Update the glasses in Meta AI.")
+      DeviceCompatibility.SDK_UPDATE_REQUIRED -> action.value = Action(null, "The glasses need a newer DAT SDK than 1.0.1. Rebuild the app with the newest mwdat version.")
+      else -> if (action.value?.fix == Fix.FIRMWARE_UPDATE) action.value = null
+    }
+  }
+
+  /** Each version error means something different; see the DAT "Version Dependencies" guide. */
+  private fun onSessionError(e: DeviceSessionError) {
+    item("dat_error", JSONObject().put("cap", "session").put("code", e.name).put("error", e.description))
+    states.value = states.value + ("session error" to e.name)
+    log("session error ${e.name}: ${e.description}")
+    when (e) {
+      DeviceSessionError.DAT_APP_ON_THE_GLASSES_UPDATE_REQUIRED -> action.value = Action(Fix.DAT_APP_UPDATE,
+          "The DAT app ON THE GLASSES is out of date (this is separate from the glasses firmware). " +
+              "Tap \"Update DAT app on glasses\", or in Meta AI open App Connections and update it. Keep the glasses on, charged above 10%, and Meta AI open.")
+      DeviceSessionError.DWA_UNAVAILABLE -> action.value = Action(Fix.DAT_APP_UPDATE,
+          "The DAT app on the glasses did not start (not installed or failed to launch). In Meta AI → Settings → App info → Developer Mode, press Install, then retry.")
+      DeviceSessionError.INSUFFICIENT_SDK_VERSION -> action.value = Action(null, "The glasses no longer accept DAT SDK 1.0.1. Rebuild with the newest mwdat version.")
+      DeviceSessionError.DWA_OUT_OF_STU_RANGE -> log("warning: app and glasses versions are outside the recommended range; the session continues")
+      DeviceSessionError.NO_ELIGIBLE_DEVICE -> action.value = Action(null, "No eligible glasses: they must be connected, worn, unfolded, and reported COMPATIBLE (see Device below).")
+      else -> {}
     }
   }
 
@@ -212,14 +265,14 @@ object GlassLink {
           jobs["session.state"] = scope.launch {
             s.state.collect { st ->
               setState("session", st.name)
-              if (st == DeviceSessionState.STARTED) onSessionStarted(s)
+              if (st == DeviceSessionState.STARTED) { if (action.value?.fix == Fix.DAT_APP_UPDATE) action.value = null; onSessionStarted(s) }
               if (st == DeviceSessionState.STOPPED) cleanupSession()
             }
           }
-          jobs["session.err"] = scope.launch { s.errors.collect { err("session", it.description) } }
+          jobs["session.err"] = scope.launch { s.errors.collect { onSessionError(it) } }
           s.start()
         },
-        onFailure = { e, _ -> err("session", e.description) },
+        onFailure = { e, _ -> onSessionError(e) },
     )
   }
 
@@ -229,12 +282,13 @@ object GlassLink {
 
   private fun cleanupSession() {
     jobs.values.forEach { it.cancel() }; jobs.clear()
-    camera = null; motion = null; inputs = null; speech = null; session = null
-    states.value = states.value.filterKeys { it == "registration" || it == "session" }
+    camera = null; motion = null; inputs = null; speech = null; display = null; session = null
+    states.value = states.value.filterKeys { it == "registration" || it == "session" || it == "session error" }
     LinkService.stop(app)
   }
 
   private fun onSessionStarted(s: DeviceSession) {
+    if (wanted.display) attachDisplay(s)
     scope.launch {
       if (wanted.camera) attachCamera(s)
       // Motion/Inputs fail with DEVICE_DISCONNECTED if attached before the device is really there;
@@ -254,6 +308,61 @@ object GlassLink {
     Wearables.checkPermissionStatus(p).onSuccess { ok = it == PermissionStatus.Granted }.onFailure { e, _ -> err("permission", "${p.name}: ${e.description}") }
     setState("perm.${p.name}", if (ok) "Granted" else "Denied")
     return ok
+  }
+
+  // ------------------------------------------------------------------- display
+  /** A read-only status card on the glasses, so you can see the DAT session is alive. */
+  private fun attachDisplay(s: DeviceSession) {
+    if (display != null) return
+    s.addDisplay(DisplayConfiguration()).fold(
+        onSuccess = { d ->
+          display = d
+          jobs["display.state"] = scope.launch { d.state.collect { setState("display", it.name) } }
+          jobs["display.loop"] = scope.launch {
+            var last = ""
+            var lastSent = 0L
+            while (true) {
+              if (d.state.value == DisplayState.STARTED) {
+                val lines = statusLines()
+                val key = lines.joinToString("|")
+                val now = System.currentTimeMillis()
+                // Full-screen replace over Bluetooth: only when something changed, and at most every 1.5 s.
+                if (key != last && now - lastSent >= 1500) {
+                  d.sendContent {
+                    flexBox(direction = Direction.COLUMN, gap = 8) {
+                      text("Glass Sensor Link", style = TextStyle.HEADING)
+                      lines.forEach { text(it, style = TextStyle.BODY) }
+                      text("phone app is in control · Back ends the session", style = TextStyle.META, color = TextColor.SECONDARY)
+                    }
+                  }.onSuccess { last = key; lastSent = now }.onFailure { e, _ -> err("display", e.description) }
+                }
+              }
+              delay(500)
+            }
+          }
+        },
+        onFailure = { e, _ -> err("display", e.description) },
+    )
+  }
+
+  private fun statusLines(): List<String> {
+    val st = states.value; val c = counters.value; val u = uplink
+    return listOf(
+        "Recorder  ${u.state.value}${u.rttMs.value?.let { " · %.0f ms".format(it) } ?: ""}",
+        "Motion  ${st["motion"] ?: "off"} · ${c["dat_motion"] ?: 0}/s",
+        "Inputs  ${st["inputs"] ?: "off"} · last $lastInputText",
+        "Camera  ${st["stream"] ?: "off"} · ${vLastFps} fps",
+    )
+  }
+  @Volatile private var vLastFps = 0
+
+  fun setDisplay(on: Boolean) {
+    wanted.display = on
+    val s = session ?: return
+    listOf("display.state", "display.loop").forEach { jobs.remove(it)?.cancel() }
+    display?.stop(); display = null
+    s.removeDisplay()
+    if (on) attachDisplay(s) else setState("display", "STOPPED (user)")
   }
 
   // -------------------------------------------------------------------- camera
@@ -463,6 +572,7 @@ object GlassLink {
       is InputEvent.Drag -> o.put("type", "drag").put("action", e.action.name).put("x", e.x.toDouble()).put("y", e.y.toDouble()).put("dx", e.dx.toDouble()).put("dy", e.dy.toDouble())
       else -> o.put("type", e.javaClass.simpleName.lowercase())
     }
+    lastInputText = o.optString("dir").ifEmpty { o.optString("type") } + " (" + e.source.name.lowercase() + ")"
     item("dat_input", o)
   }
 
@@ -505,6 +615,7 @@ object GlassLink {
       "motion" -> setMotion(a.optBoolean("on", true), a.optInt("rate", wanted.motionRate))
       "inputs" -> setInputs(a.optBoolean("on", true))
       "speech" -> setSpeech(a.optBoolean("on", true))
+      "display" -> setDisplay(a.optBoolean("on", true))
       "start_session" -> startSession()
       "stop_session" -> stopSession()
       "marker" -> log("marker: ${a.optString("label")}")

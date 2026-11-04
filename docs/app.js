@@ -16,6 +16,7 @@ const nowMs = () => T0 + performance.now();
 const evMs = (e) => (e && e.timeStamp ? T0 + e.timeStamp : nowMs());
 const r3 = (v) => (v == null || Number.isNaN(v) ? null : Math.round(v * 1000) / 1000);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const PAGE = document.body.dataset.page || "main"; // "main" (index.html) or "drag" (drag.html)
 const SID = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2)).slice(0, 8);
 
 /* ------------------------------------------------------------------ config */
@@ -201,13 +202,15 @@ function onOrientAbs(e) {
 }
 
 async function requestMotionPermission() {
-  const out = {};
-  for (const [name, C] of [["motion", window.DeviceMotionEvent], ["orientation", window.DeviceOrientationEvent]]) {
-    if (!C) { out[name] = "unsupported"; continue; }
-    if (typeof C.requestPermission === "function") {
-      try { out[name] = await C.requestPermission(); } catch (e) { out[name] = "error:" + (e && e.name); }
-    } else out[name] = "implicit";
-  }
+  // Both constructors share ONE sensor permission on MRBD; call requestPermission() once, while the
+  // click's user activation is still fresh (a second awaited call can lose it).
+  const O = window.DeviceOrientationEvent, M = window.DeviceMotionEvent;
+  const owner = typeof O?.requestPermission === "function" ? O : typeof M?.requestPermission === "function" ? M : null;
+  let st;
+  if (!O && !M) st = "unsupported";
+  else if (!owner) st = "implicit";
+  else { try { st = await owner.requestPermission(); } catch (e) { st = "error:" + (e && e.name); } }
+  const out = { motion: M ? st : "unsupported", orientation: O ? st : "unsupported" };
   sensors.perm.motion = out.motion; sensors.perm.orientation = out.orientation;
   net.push({ s: "perm", ts: nowMs(), ...out });
   return out;
@@ -265,6 +268,41 @@ function startGeneric(stream, cls, freq = 60) {
   });
 }
 
+/* Neural Band wrist orientation: RelativeOrientationSensor({sensorId:"emg-wrist"}). Only trust it when the
+   glasses runtime has injected its marker (it lands a few hundred ms after load); otherwise the constructor is
+   the browser's own and silently reports the HOST orientation. Quaternions arrive w-first [w,x,y,z]. */
+const wrist = {
+  s: null, state: "idle", n: 0, tries: 0, last: null,
+  marker() { const C = window.RelativeOrientationSensor; return typeof C === "function" && C.__imuQuatWrapped === true; },
+  async start() {
+    if (this.s || this.state === "waiting") return this.state;
+    this.state = "waiting";
+    for (let i = 0; i < 50 && !this.marker(); i++) await sleep(100);
+    if (!this.marker()) { this.state = "unavailable"; net.push({ s: "nb_wrist_state", ts: nowMs(), state: this.state }); return this.state; }
+    try { this.s = new RelativeOrientationSensor({ sensorId: "emg-wrist", frequency: 60 }); }
+    catch (e) { this.state = "error:" + e.name; net.push({ s: "nb_wrist_state", ts: nowMs(), state: this.state }); return this.state; }
+    this.s.onreading = () => {
+      const q = this.s.quaternion; if (!q) return;
+      this.n++;
+      const [w, x, y, z] = q;
+      const it = { s: "nb_wrist", ts: r3(this.s.timestamp ? T0 + this.s.timestamp : nowMs()), qw: r3(w), qx: r3(x), qy: r3(y), qz: r3(z),
+        twist: r3((2 * Math.atan2(y, w) * 180) / Math.PI) }; // roll about the forearm (+Y) axis, degrees
+      net.push(it); this.last = it; bus.emit("nb_wrist", it);
+    };
+    this.s.onerror = (e) => {
+      const name = e.error ? e.error.name : "error";
+      net.push({ s: "nb_wrist_state", ts: nowMs(), state: "error", err: name, msg: e.error ? e.error.message : null });
+      try { this.s.stop(); } catch {}
+      this.s = null; this.state = "error:" + name;
+      // NotReadableError usually means the band is not worn; retry with backoff.
+      if (name === "NotReadableError" && this.tries++ < 6) setTimeout(() => this.start(), 2000 * this.tries);
+    };
+    this.s.start(); this.state = "running";
+    net.push({ s: "nb_wrist_state", ts: nowMs(), state: this.state });
+    return this.state;
+  },
+};
+
 async function startBattery() {
   if (!navigator.getBattery) return null;
   try {
@@ -312,6 +350,11 @@ function logInput(e, extra) {
   if (e.type === "keydown" || e.type === "click" || e.type === "pointerdown") { live.lastInput = `${e.type} ${extra.key || ""}`.trim(); live.lastInputAt = nowMs(); }
   return it;
 }
+const keyAt = { enter: 0 }; // wall time (dispatch) of the last Enter keydown, for pinch de-duplication
+addEventListener("keydown", (e) => { if (e.key === "Enter") keyAt.enter = nowMs(); }, true);
+// No free cursor on MRBD: if the host still sends a pointer press (e.g. a pinch in drag mode), do not let it
+// move focus off the selected control, or the Enter that follows hits <body>. Text fields keep their default.
+if (PAGE === "main") addEventListener("pointerdown", (e) => { if (!e.target.closest?.("input,textarea,[contenteditable]")) e.preventDefault(); }, true);
 addEventListener("keydown", (e) => logInput(e, { key: e.key, code: e.code, kc: e.keyCode, rep: e.repeat, alt: e.altKey, ctrl: e.ctrlKey, meta: e.metaKey, shift: e.shiftKey }), true);
 addEventListener("keyup", (e) => logInput(e, { key: e.key, code: e.code, kc: e.keyCode }), true);
 addEventListener("click", (e) => logInput(e, { x: r3(e.clientX), y: r3(e.clientY), det: e.detail, pt: e.pointerType || null }), true);
@@ -485,18 +528,26 @@ function go(name) {
   ui.show(name);
 }
 addEventListener("popstate", (e) => ui.show((e.state && e.state.screen) || "home"));
-document.addEventListener("click", (e) => {
-  const b = e.target.closest("button,[data-go],[data-act]"); if (!b) return;
+function activate(b) {
   if (b.dataset.go) go(b.dataset.go);
   if (b.dataset.act) actions[b.dataset.act]?.(b);
+}
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("button,[data-go],[data-act]"); if (!b) return;
+  if (e.detail === 0) { activate(b); return; } // keyboard / Enter activation of the focused control
+  // A pointer click: on the glasses a pinch can produce BOTH a click at screen centre and an Enter; act on
+  // the pointer click only if no Enter arrives right after it (desktop mouse testing still works).
+  const t = nowMs();
+  setTimeout(() => { if (keyAt.enter < t - 60) activate(b); }, 180);
 });
 
 const actions = {
   async enable(b) {
     const p = await requestMotionPermission();
     startMotion(); startGeo();
-    b.classList.add("done"); b.querySelector("small").textContent = `motion:${p.motion} orient:${p.orientation}`;
-    ui.toast("Sensors on");
+    const w = await wrist.start();
+    if (b) { b.classList.add("done"); b.querySelector("small").textContent = `motion:${p.motion} · wrist:${w}`; }
+    ui.toast(`Sensors on · wrist ${w}`);
   },
   save() {
     cfg.server = $("in-server").value.trim(); cfg.key = $("in-key").value.trim();
@@ -509,6 +560,7 @@ const actions = {
     catch (e) { ui.toast("Camera/mic: " + e.message); net.push({ s: "media", ts: nowMs(), ev: "error", err: String(e.name + ": " + e.message) }); }
   },
   async speak() { const r = await speak("Sensor suite speech test."); ui.toast(r.ok ? `TTS ok, start ${Math.round(r.startLatency)} ms` : "TTS: " + r.error); },
+  dragpage() { location.href = "drag.html" + location.search; }, // separate load: only that page opts into drag
   pause(b) { net.paused = !net.paused; b.textContent = net.paused ? "Resume stream" : "Pause stream"; ui.bar(); },
 };
 
@@ -561,7 +613,8 @@ screens.live = {
     c.font = "15px 'IBM Plex Mono', monospace"; c.fillStyle = "#b9b9b0";
     c.fillText(`hdg ${hdg == null ? "–" : hdg.toFixed(0) + "°"} ${abs.abs ? "abs" : "rel"}`, 410, 478);
     const g = live.geo;
-    $("live-last").textContent = `${live.lastInput}  ·  ${g ? `${g.lat.toFixed(5)},${g.lon.toFixed(5)} ±${Math.round(g.acc)}m` : "no GPS"}`;
+    const wl = wrist.last;
+    $("live-last").textContent = `${live.lastInput} · ${wl ? `wrist ${wl.twist.toFixed(0)}°` : "wrist " + wrist.state} · ${g ? `${g.lat.toFixed(4)},${g.lon.toFixed(4)} ±${Math.round(g.acc)}m` : "no GPS"}`;
     requestAnimationFrame(() => this.draw());
   },
 };
@@ -799,14 +852,20 @@ const TESTS = [
     const keys = [...new Set(got)];
     return { status: got.length ? "pass" : "warn", metrics: { events: got.length, keys }, notes: keys.join(" ") || "no key events" };
   }],
-  ["drag_input", "Pinch-and-drag (pointer events)", async () => {
-    const pts = []; const off = bus.on("input", (it) => it.ev.startsWith("pointer") && pts.push(it));
-    await countdown(8, "Pinch and HOLD, then drag around");
-    off();
-    const mv = pts.filter((p) => p.ev === "pointermove");
-    const xs = mv.map((p) => p.x), ys = mv.map((p) => p.y);
-    return { status: mv.length ? "pass" : "warn", metrics: { events: pts.length, moves: mv.length, x: stat(xs), y: stat(ys), types: [...new Set(pts.map((p) => p.pt))], rate: rateOf(mv) } };
+  ["nb_wrist", "Neural Band wrist orientation (emg-wrist)", async () => {
+    tPrompt("Looking for the wrist sensor…");
+    const st = await wrist.start();
+    if (st !== "running") return { status: st === "unavailable" ? "unsupported" : "fail", metrics: { state: st, marker: wrist.marker() }, notes: st };
+    const w = collect("nb_wrist");
+    await countdown(6, "TWIST your forearm left and right");
+    w.stop();
+    if (!w.arr.length) return { status: "fail", notes: "no readings (band worn?)", metrics: { state: wrist.state } };
+    let prev = null, acc = 0, lo = 0, hi = 0;
+    for (const r of w.arr) { if (prev != null) { let d = r.twist - prev; if (d > 180) d -= 360; if (d < -180) d += 360; acc += d; lo = Math.min(lo, acc); hi = Math.max(hi, acc); } prev = r.twist; }
+    const span = r3(hi - lo);
+    return { status: span > 30 ? "pass" : "warn", metrics: { rate: rateOf(w.arr), twist_span_deg: span, n: w.arr.length }, notes: `${rateOf(w.arr).hz} Hz, twist ${span}°` };
   }],
+  ["drag_input", "Pinch-and-drag (pointer events)", async () => ({ status: "skip", notes: "drag mode is per page: open Drag pad" })],
 ];
 
 function renderList(results, current) {
@@ -863,16 +922,23 @@ async function runNeural(rounds = 3) {
     if (e.repeat) return;
     if (pending) pending({ g: g || "OTHER:" + e.key, ts: evMs(e), via: "keydown" });
   };
-  let lastKeyTs = 0;
-  const onKeyTs = (e) => { lastKeyTs = evMs(e); };
-  const onClick = (e) => { if (evMs(e) - lastKeyTs > 120 && pending) pending({ g: "SELECT", ts: evMs(e), via: "click" }); e.preventDefault(); };
+  let trialNo = 0;
+  const onKeyTs = () => {};
+  // Count a pointer click as SELECT only if no Enter follows it (a pinch can send both); keyboard clicks
+  // (detail 0) are already counted through keydown.
+  const onClick = (e) => {
+    e.preventDefault();
+    if (e.detail === 0) return;
+    const t = nowMs(), ts = evMs(e), at = trialNo;
+    setTimeout(() => { if (keyAt.enter < t - 60 && at === trialNo && pending) pending({ g: "SELECT", ts, via: "click" }); }, 180);
+  };
   addEventListener("keydown", onKeyTs, true);
   addEventListener("keydown", onKey, true);
   addEventListener("click", onClick, true);
   const fb = $("nb-feedback");
   net.sendJson({ t: "nb_test", phase: "start", ts: nowMs(), n: seq.length });
   for (let i = 0; i < seq.length && !nb.abort; i++) {
-    const want = seq[i];
+    const want = seq[i]; trialNo = i;
     $("nb-step").textContent = `${i + 1} / ${seq.length}`;
     $("nb-arrow").textContent = NB_GLYPH[want];
     $("nb-label").textContent = want === "DOUBLE" ? "PINCH TWICE quickly" : want === "SELECT" ? "PINCH (select)" : `SWIPE ${want}`;
@@ -935,14 +1001,16 @@ async function remote(cmd, a) {
 
 /* -------------------------------------------------------------- boot */
 (async function boot() {
-  history.replaceState({ screen: "home" }, "");
-  ui.show("home");
+  const first = PAGE === "drag" ? "drag" : "home";
+  history.replaceState({ screen: first }, "");
+  ui.show(first);
   await loadDefaultConfig();
   net.connect();
   startBattery(); startNetInfo();
   caps.probe();
   // motion may already be granted (permission persists); try silently
   if (window.DeviceMotionEvent && typeof DeviceMotionEvent.requestPermission !== "function") { startMotion(); }
+  wrist.start(); // Generic Sensor permission is already granted on MRBD; harmless if unavailable
   setInterval(() => ui.bar(), 15000);
   if (window.speechSynthesis) speechSynthesis.onvoiceschanged = () => {};
 })();

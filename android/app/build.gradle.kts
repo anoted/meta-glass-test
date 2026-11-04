@@ -46,6 +46,7 @@ dependencies {
   implementation("com.meta.wearable:mwdat-inputs:$mwdat")
   implementation("com.meta.wearable:mwdat-motion:$mwdat")
   implementation("com.meta.wearable:mwdat-speech:$mwdat")
+  implementation("com.meta.wearable:mwdat-display:$mwdat")
   implementation("androidx.activity:activity-ktx:1.13.0")
   implementation("androidx.core:core-ktx:1.16.0")
   implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.10.0")

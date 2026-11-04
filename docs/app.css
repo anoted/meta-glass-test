@@ -19,10 +19,12 @@
 }
 * { box-sizing: border-box; }
 html, body {
-  margin: 0; width: 600px; height: 600px; overflow: hidden;
+  margin: 0; width: 100%; height: 100%; max-width: 600px; max-height: 600px; overflow: hidden;
   background: var(--bg); color: var(--ink);
   font-family: var(--serif); font-size: 20px;
-  touch-action: none; /* opt in to Neural Band pinch-and-drag */
+  /* No touch-action:none here. On MRBD it opts the whole page into drag mode, and then every pinch also
+     arrives as a mouse pointerdown/click at the screen centre (300,300). That pointerdown blurs the
+     focused tile, so the Enter that follows lands on <body> and activates nothing. Only drag.html opts in. */
   -webkit-user-select: none; user-select: none;
 }
 #bar {

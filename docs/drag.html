@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mrbd-web-app-capable" content="yes">
+<title>Sensor Suite · Drag pad</title>
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="manifest" href="manifest.json">
+<link href="https://fonts.googleapis.com/css2?family=STIX+Two+Text:wght@400;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css">
+<!-- The MRBD host reads body touch-action once per page load from the initial styles; this is the only
+     page that opts in to Neural Band pinch-and-drag (pointer events). Back returns to the main page. -->
+<style>body { touch-action: none; }</style>
+</head>
+<body data-page="drag">
+<header id="bar">
+  <span id="link-dot" class="dot"></span>
+  <span id="link-txt">offline</span>
+  <span id="rate-txt"></span>
+  <span class="grow"></span>
+  <span id="rec-txt"></span>
+  <span id="bat-txt"></span>
+  <span id="clock-txt"></span>
+</header>
+<main id="screens">
+  <section id="s-drag" class="screen">
+    <canvas id="drag-cv" width="600" height="500"></canvas>
+    <div id="drag-info" class="last">pinch, hold and drag · Back to exit</div>
+  </section>
+</main>
+<div id="toast" hidden></div>
+<video id="cam" playsinline muted hidden></video>
+<script src="app.js"></script>
+</body>
+</html>
