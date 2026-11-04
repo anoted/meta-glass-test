@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+recordings/
+server/.secret_key
+android/local.properties
+android/.gradle/
+android/build/
+android/app/build/
+*.apk

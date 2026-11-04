@@ -1,0 +1,4 @@
+{
+  "server": "legionx-1.tail9f0e22.ts.net",
+  "note": "Default recorder host (Tailscale Funnel). The access key is passed as ?key=... in the Web App URL, or entered in Setup."
+}

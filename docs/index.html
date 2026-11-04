@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=600, height=600, initial-scale=1.0, user-scalable=no">
+<meta name="mrbd-web-app-capable" content="yes">
+<meta name="description" content="Sensor Suite: tests and streams every sensor and input on Meta Ray-Ban Display + Neural Band to a recorder PC.">
+<title>Sensor Suite</title>
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="manifest" href="manifest.json">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=STIX+Two+Text:wght@400;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header id="bar">
+  <span id="link-dot" class="dot"></span>
+  <span id="link-txt">offline</span>
+  <span id="rate-txt"></span>
+  <span class="grow"></span>
+  <span id="rec-txt"></span>
+  <span id="bat-txt"></span>
+  <span id="clock-txt"></span>
+</header>
+
+<main id="screens">
+  <!-- HOME -->
+  <section id="s-home" class="screen">
+    <div class="grid">
+      <button id="b-enable" class="tile hot" data-act="enable"><b>Enable sensors</b><small>motion · compass · GPS</small></button>
+      <button class="tile" data-go="tests"><b>Run test suite</b><small>all sensors, guided</small></button>
+      <button class="tile" data-go="neural"><b>Neural Band</b><small>gesture accuracy · latency</small></button>
+      <button class="tile" data-go="live"><b>Live sensors</b><small>IMU · horizon · compass</small></button>
+      <button class="tile" data-go="drag"><b>Drag pad</b><small>pinch-and-drag trail</small></button>
+      <button class="tile" data-go="setup"><b>Setup</b><small>server · text input · camera</small></button>
+    </div>
+    <p id="home-msg" class="hint">Swipe to move · pinch to select · Back to exit</p>
+  </section>
+
+  <!-- LIVE -->
+  <section id="s-live" class="screen">
+    <canvas id="live-cv" width="600" height="500"></canvas>
+    <div id="live-last" class="last">—</div>
+  </section>
+
+  <!-- TESTS -->
+  <section id="s-tests" class="screen">
+    <div id="t-head"><span id="t-name">Test suite</span><span id="t-count"></span></div>
+    <div id="t-prompt" class="prompt">Starting…</div>
+    <div id="t-bar"><div id="t-fill"></div></div>
+    <ol id="t-list"></ol>
+  </section>
+
+  <!-- NEURAL -->
+  <section id="s-neural" class="screen">
+    <div id="nb-focus" tabindex="0" aria-label="gesture target">
+      <div id="nb-step"></div>
+      <div id="nb-arrow">·</div>
+      <div id="nb-label">Get ready</div>
+      <div id="nb-feedback"></div>
+    </div>
+    <div id="nb-stats"></div>
+  </section>
+
+  <!-- DRAG -->
+  <section id="s-drag" class="screen">
+    <canvas id="drag-cv" width="600" height="500"></canvas>
+    <div id="drag-info" class="last">pinch and drag</div>
+  </section>
+
+  <!-- SETUP -->
+  <section id="s-setup" class="screen">
+    <div class="form">
+      <label>Server host <input id="in-server" type="url" inputmode="url" placeholder="host.tailnet.ts.net"></label>
+      <label>Key <input id="in-key" type="text" placeholder="key"></label>
+      <label>Text input test <input id="in-text" type="text" placeholder="handwrite or dictate here"></label>
+      <div class="row">
+        <button id="b-save" data-act="save">Save + reconnect</button>
+        <button id="b-media" data-act="media">Camera / mic</button>
+      </div>
+      <div class="row">
+        <button data-act="speak">Speak test</button>
+        <button data-act="pause">Pause stream</button>
+      </div>
+      <div id="setup-info" class="mono small"></div>
+    </div>
+  </section>
+</main>
+
+<div id="toast" hidden></div>
+<video id="cam" playsinline muted hidden></video>
+<script src="app.js"></script>
+</body>
+</html>

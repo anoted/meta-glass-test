@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sensor Suite Recorder</title>
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=STIX+Two+Text:ital,wght@0,400;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+<header class="top">
+  <div class="title">
+    <h1>Sensor Suite <span>· Meta Ray-Ban Display &amp; Neural Band</span></h1>
+    <div id="conn" class="mono small">connecting…</div>
+  </div>
+  <div class="rec">
+    <span id="rec-dot" class="recdot"></span>
+    <span id="rec-name" class="mono small">no session</span>
+    <input id="marker-in" placeholder="marker label" aria-label="marker label">
+    <button id="b-marker">Marker</button>
+    <button id="b-newses">New session</button>
+    <button id="b-rec">Stop recording</button>
+  </div>
+</header>
+
+<nav class="tabs" role="tablist">
+  <button data-tab="overview" class="on">Overview</button>
+  <button data-tab="web">Glasses · Web App</button>
+  <button data-tab="dat">Glasses · DAT SDK</button>
+  <button data-tab="tests">Tests</button>
+  <button data-tab="recordings">Recordings</button>
+  <button data-tab="setup">Setup</button>
+</nav>
+
+<main>
+<!-- ================================================= OVERVIEW -->
+<section id="t-overview" class="tab on">
+  <div class="cards" id="src-cards"></div>
+  <div class="grid2">
+    <article class="panel">
+      <h2>Stream rates</h2>
+      <p class="cap">Samples per second, per source and stream. Updated every second.</p>
+      <table class="tbl" id="rates-tbl"><thead><tr><th>source</th><th>stream</th><th class="num">/s</th><th class="num">total</th></tr></thead><tbody></tbody></table>
+    </article>
+    <article class="panel">
+      <h2>Remote control</h2>
+      <p class="cap">Commands are sent to the connected source(s) and logged in the recording.</p>
+      <div class="ctl">
+        <h3>Web App</h3>
+        <button data-cmd="web:run_tests">Run test suite</button>
+        <button data-cmd="web:nb_test">Neural Band test</button>
+        <button data-cmd="web:screen" data-args='{"name":"live"}'>Show live screen</button>
+        <button data-cmd="web:caps">Re-probe capabilities</button>
+        <button data-cmd="web:reload">Reload app</button>
+        <div class="inline"><input id="say-in" placeholder="text for glasses"><button id="b-say">Speak</button><button id="b-show">Show</button></div>
+        <h3>DAT app (phone)</h3>
+        <button data-cmd="dat:run_tests">Run DAT test suite</button>
+        <button data-cmd="dat:photo">Capture photo</button>
+        <button data-cmd="dat:camera" data-args='{"on":true}'>Camera on</button>
+        <button data-cmd="dat:camera" data-args='{"on":false}'>Camera off</button>
+        <button data-cmd="dat:speech" data-args='{"on":true}'>Speech on</button>
+        <button data-cmd="dat:speech" data-args='{"on":false}'>Speech off</button>
+        <label class="inline">motion rate
+          <select id="motion-rate"><option>5</option><option>10</option><option>15</option><option>24</option><option>30</option><option selected>60</option></select>
+          <button id="b-rate">Apply</button></label>
+      </div>
+    </article>
+  </div>
+  <article class="panel">
+    <h2>Event log</h2>
+    <div id="log" class="log mono"></div>
+  </article>
+</section>
+
+<!-- ================================================= WEB -->
+<section id="t-web" class="tab">
+  <div class="grid2">
+    <article class="panel"><h2>Accelerometer <em>incl. gravity</em></h2><p class="cap">DeviceMotionEvent.accelerationIncludingGravity, m/s². Dashed: |a|.</p><div id="w-acc" class="ch"></div></article>
+    <article class="panel"><h2>Rotation rate</h2><p class="cap">DeviceMotionEvent.rotationRate, °/s.</p><div id="w-gyr" class="ch"></div></article>
+    <article class="panel"><h2>Linear acceleration</h2><p class="cap">DeviceMotionEvent.acceleration (gravity removed), m/s².</p><div id="w-lin" class="ch"></div></article>
+    <article class="panel"><h2>Orientation</h2><p class="cap">DeviceOrientationEvent α (yaw) β (pitch) γ (roll), degrees.</p><div id="w-ori" class="ch"></div></article>
+    <article class="panel"><h2>Head pose</h2><p class="cap">Orientation rendered as a rigid body; heading from the absolute stream when present.</p>
+      <div class="pose-row"><canvas id="w-pose" class="pose"></canvas><div id="w-pose-txt" class="mono small"></div></div></article>
+    <article class="panel"><h2>Location</h2><p class="cap">navigator.geolocation (sourced from the paired phone).</p><div id="w-map" class="map"></div><div id="w-geo" class="mono small"></div></article>
+    <article class="panel"><h2>Neural Band &amp; touchpad input</h2><p class="cap">Key, click and pointer events delivered to the Web App.</p>
+      <div class="input-row"><div id="w-last" class="big">—</div><div id="w-keys" class="bars"></div></div>
+      <div id="w-inlog" class="log mono short"></div></article>
+    <article class="panel"><h2>Pinch-and-drag</h2><p class="cap">Pointer trail in viewport coordinates (600 × 600).</p><canvas id="w-drag" class="drag"></canvas></article>
+    <article class="panel"><h2>Runtime health</h2><p class="cap">Frames per second and event-loop lag on the glasses.</p><div id="w-perf" class="ch"></div></article>
+    <article class="panel"><h2>Link</h2><p class="cap">WebSocket round-trip time (ms) from glasses to this PC.</p><div id="w-rtt" class="ch"></div></article>
+    <article class="panel"><h2>Device status</h2><div id="w-tiles" class="tiles"></div></article>
+    <article class="panel" id="w-generic-panel"><h2>Generic Sensor API</h2><p class="cap">Streams appear here if the runtime exposes them.</p><div id="w-generic"></div></article>
+    <article class="panel"><h2>Camera / microphone</h2><p class="cap">Only if the runtime grants getUserMedia (normally not available to Web Apps).</p><img id="w-cam" class="cam" alt="no web camera frames"><div id="w-alevel" class="ch short"></div></article>
+  </div>
+</section>
+
+<!-- ================================================= DAT -->
+<section id="t-dat" class="tab">
+  <div class="grid2">
+    <article class="panel"><h2>Device</h2><p class="cap">Wearables.devicesMetadata: link, battery, thermal, worn (don) and hinge state.</p><div id="d-tiles" class="tiles"></div></article>
+    <article class="panel"><h2>Capability states</h2><p class="cap">Registration, session and per-capability lifecycle as reported by the SDK.</p><div id="d-states" class="tiles"></div></article>
+    <article class="panel"><h2>Glasses accelerometer</h2><p class="cap">MotionSample.accelerometer (source GLASSES), m/s², includes gravity.</p><div id="d-acc-g" class="ch"></div></article>
+    <article class="panel"><h2>Glasses gyroscope</h2><p class="cap">MotionSample.gyroscope (source GLASSES), rad/s.</p><div id="d-gyr-g" class="ch"></div></article>
+    <article class="panel"><h2>Glasses magnetometer</h2><p class="cap">MotionSample.magnetometer, µT. Dashed: |B|.</p><div id="d-mag-g" class="ch"></div></article>
+    <article class="panel"><h2>Glasses orientation</h2><p class="cap">Fused quaternion (w, x, y, z).</p><div class="pose-row"><canvas id="d-pose-g" class="pose"></canvas><div id="d-quat-g" class="ch narrow"></div></div></article>
+    <article class="panel"><h2>Neural Band accelerometer</h2><p class="cap">MotionSample.accelerometer (source NEURAL_BAND), m/s².</p><div id="d-acc-n" class="ch"></div></article>
+    <article class="panel"><h2>Neural Band gyroscope</h2><p class="cap">MotionSample.gyroscope (source NEURAL_BAND), rad/s.</p><div id="d-gyr-n" class="ch"></div></article>
+    <article class="panel"><h2>Neural Band orientation</h2><p class="cap">Fused quaternion from the wrist, if delivered.</p><div class="pose-row"><canvas id="d-pose-n" class="pose"></canvas><div id="d-mag-n" class="ch narrow"></div></div></article>
+    <article class="panel"><h2>Motion sample timing</h2><p class="cap">Inter-sample interval from device timestampNs, ms, per source.</p><div id="d-dt" class="ch"></div></article>
+    <article class="panel"><h2>Inputs</h2><p class="cap">InputEvent: Nav, Select, Back, Button, Capture, Drag, by source (captouch, Neural Band, buttons).</p>
+      <div class="input-row"><div id="d-last" class="big">—</div><div id="d-keys" class="bars"></div></div>
+      <div id="d-inlog" class="log mono short"></div></article>
+    <article class="panel"><h2>Neural Band drag</h2><p class="cap">NEURAL_BAND_DRAG x, y; coordinates have no guaranteed origin or range.</p><canvas id="d-drag" class="drag"></canvas></article>
+    <article class="panel"><h2>Camera</h2><p class="cap">HEVC stream decoded on the PC for preview; the recording keeps the original bitstream.</p><img id="d-cam" class="cam" alt="no camera frames"><div id="d-camstat" class="mono small"></div></article>
+    <article class="panel"><h2>Photos</h2><p class="cap">Captured through the stream or the standalone Photo capability.</p><div id="d-photos" class="photos"></div></article>
+    <article class="panel"><h2>Microphone</h2><p class="cap">PCM16 from the camera stream's audio track. <label class="inline"><input type="checkbox" id="listen"> listen</label></p>
+      <canvas id="d-spec" class="spec"></canvas><div id="d-alevel" class="ch short"></div></article>
+    <article class="panel"><h2>Speech recognition</h2><p class="cap">On-device transcriptions (partial in italics).</p><div id="d-speech" class="log speech"></div></article>
+  </div>
+</section>
+
+<!-- ================================================= TESTS -->
+<section id="t-tests" class="tab">
+  <article class="panel">
+    <h2>Test results</h2>
+    <p class="cap">Latest result per test and source. Click a row for the full metrics.</p>
+    <table class="tbl" id="tests-tbl"><thead><tr><th>source</th><th>test</th><th>status</th><th>summary</th><th class="num">duration</th></tr></thead><tbody></tbody></table>
+  </article>
+  <div class="grid2">
+    <article class="panel"><h2>Neural Band gesture test</h2><p class="cap">Prompted gesture vs. received event (Web App, arrow/Enter mapping).</p><div id="nb-summary"></div></article>
+    <article class="panel"><h2>Capabilities</h2><p class="cap">Browser API probe from the glasses runtime.</p><div id="caps" class="caps"></div></article>
+  </div>
+  <article class="panel"><h2>Metrics</h2><pre id="test-detail" class="mono small">Select a test.</pre></article>
+</section>
+
+<!-- ================================================= RECORDINGS -->
+<section id="t-recordings" class="tab">
+  <article class="panel">
+    <h2>Recorded sessions</h2>
+    <p class="cap">Each session folder holds raw JSONL, CSV per stream, media and an HTML report.</p>
+    <button id="b-refresh">Refresh</button>
+    <div id="sessions"></div>
+  </article>
+</section>
+
+<!-- ================================================= SETUP -->
+<section id="t-setup" class="tab">
+  <div class="grid2">
+    <article class="panel"><h2>1 · Glasses Web App</h2>
+      <p>Meta AI app → Settings → App Info → tap the version 5× (Developer Mode) → App Settings → Apps → Web Apps → Connect Web App, and paste:</p>
+      <code id="l-glasses" class="url"></code>
+      <p>Or scan this deep link with the phone camera:</p><img id="qr-glasses" class="qr" alt="QR for glasses deep link">
+    </article>
+    <article class="panel"><h2>2 · Android DAT app</h2>
+      <p>Install <code>android/app/build/outputs/apk/debug/app-debug.apk</code>, then scan to configure the server and key:</p>
+      <img id="qr-android" class="qr" alt="QR for Android config"><code id="l-android" class="url"></code>
+      <p>Ingest endpoint: <code id="l-ingest"></code></p>
+    </article>
+    <article class="panel"><h2>Remote dashboard</h2><p>The same dashboard, served from GitHub Pages, from anywhere:</p><code id="l-remote" class="url"></code></article>
+    <article class="panel"><h2>Connection</h2><div id="setup-conn" class="mono small"></div>
+      <div class="inline"><input id="cfg-server" placeholder="host.tailnet.ts.net"><input id="cfg-key" placeholder="key"><button id="b-cfg">Connect</button></div></article>
+  </div>
+</section>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="charts.js"></script>
+<script src="dashboard.js"></script>
+</body>
+</html>
