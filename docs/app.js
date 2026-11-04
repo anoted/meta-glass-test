@@ -347,7 +347,9 @@ const tgt = (e) => (e.target && (e.target.id || e.target.dataset?.go || e.target
 function logInput(e, extra) {
   const it = { s: "input", ts: r3(evMs(e)), ev: e.type, tgt: tgt(e), scr: ui.screen, ...extra };
   net.push(it); bus.emit("input", it);
-  if (e.type === "keydown" || e.type === "click" || e.type === "pointerdown") { live.lastInput = `${e.type} ${extra.key || ""}`.trim(); live.lastInputAt = nowMs(); }
+  if (e.type === "keydown" || e.type === "click" || e.type === "pointerdown" || e.type === "wheel") {
+    live.lastInput = e.type === "wheel" ? `wheel ${extra.dx},${extra.dy}` : `${e.type} ${extra.key || ""}`.trim(); live.lastInputAt = nowMs();
+  }
   return it;
 }
 const keyAt = { enter: 0 }; // wall time (dispatch) of the last Enter keydown, for pinch de-duplication

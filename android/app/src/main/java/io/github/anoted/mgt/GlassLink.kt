@@ -29,6 +29,7 @@ import com.meta.wearable.dat.display.addDisplay
 import com.meta.wearable.dat.display.removeDisplay
 import com.meta.wearable.dat.display.types.DisplayConfiguration
 import com.meta.wearable.dat.display.types.DisplayState
+import com.meta.wearable.dat.display.views.ButtonStyle
 import com.meta.wearable.dat.display.views.Direction
 import com.meta.wearable.dat.display.views.TextColor
 import com.meta.wearable.dat.display.views.TextStyle
@@ -38,6 +39,7 @@ import com.meta.wearable.dat.inputs.removeInputs
 import com.meta.wearable.dat.inputs.types.InputEvent
 import com.meta.wearable.dat.inputs.types.InputsConfiguration
 import com.meta.wearable.dat.inputs.types.InputsError
+import com.meta.wearable.dat.inputs.types.InputSource
 import com.meta.wearable.dat.motion.Motion
 import com.meta.wearable.dat.motion.addMotion
 import com.meta.wearable.dat.motion.removeMotion
@@ -109,7 +111,6 @@ object GlassLink {
   private var speech: Speech? = null
   private var display: Display? = null
   private var lastDon: DonState? = null
-  @Volatile private var lastInputText = "–"
   private val jobs = HashMap<String, Job>()
   private val deviceJobs = HashMap<DeviceIdentifier, Job>()
   private val counts = HashMap<String, Int>()
@@ -311,7 +312,8 @@ object GlassLink {
   }
 
   // ------------------------------------------------------------------- display
-  /** A read-only status card on the glasses, so you can see the DAT session is alive. */
+  /** A status card on the glasses with two buttons. The buttons give touchpad / Neural Band focus + pinch something
+   *  to act on: the display routes those gestures to onClick, which is logged as dat_display_click. */
   private fun attachDisplay(s: DeviceSession) {
     if (display != null) return
     s.addDisplay(DisplayConfiguration()).fold(
@@ -324,15 +326,20 @@ object GlassLink {
             while (true) {
               if (d.state.value == DisplayState.STARTED) {
                 val lines = statusLines()
-                val key = lines.joinToString("|")
+                val key = lines.joinToString("|") + "|" + displayClicks
                 val now = System.currentTimeMillis()
                 // Full-screen replace over Bluetooth: only when something changed, and at most every 1.5 s.
+                // statusLines() holds no fast-changing numbers, so the buttons are not re-sent (and refocused) constantly.
                 if (key != last && now - lastSent >= 1500) {
                   d.sendContent {
                     flexBox(direction = Direction.COLUMN, gap = 8) {
                       text("Glass Sensor Link", style = TextStyle.HEADING)
                       lines.forEach { text(it, style = TextStyle.BODY) }
-                      text("phone app is in control · Back ends the session", style = TextStyle.META, color = TextColor.SECONDARY)
+                      flexBox(direction = Direction.ROW, gap = 12) {
+                        button(label = "Mark", style = ButtonStyle.PRIMARY, onClick = { onDisplayClick("mark") })
+                        button(label = "Photo", style = ButtonStyle.SECONDARY, onClick = { onDisplayClick("photo") })
+                      }
+                      text("pinch: ${displayClicks} · Back ends the session", style = TextStyle.META, color = TextColor.SECONDARY)
                     }
                   }.onSuccess { last = key; lastSent = now }.onFailure { e, _ -> err("display", e.description) }
                 }
@@ -346,13 +353,20 @@ object GlassLink {
   }
 
   private fun statusLines(): List<String> {
-    val st = states.value; val c = counters.value; val u = uplink
+    val st = states.value; val u = uplink
     return listOf(
-        "Recorder  ${u.state.value}${u.rttMs.value?.let { " · %.0f ms".format(it) } ?: ""}",
-        "Motion  ${st["motion"] ?: "off"} · ${c["dat_motion"] ?: 0}/s",
-        "Inputs  ${st["inputs"] ?: "off"} · last $lastInputText",
-        "Camera  ${st["stream"] ?: "off"} · ${vLastFps} fps",
+        "Recorder  ${u.state.value}",
+        "Motion  ${st["motion"] ?: "off"}",
+        "Inputs  ${st["inputs"] ?: "off"}",   // no "last input" here: re-sending on every swipe would reset button focus
+        "Camera  ${st["stream"] ?: "off"}",
     )
+  }
+  @Volatile private var displayClicks = 0
+
+  private fun onDisplayClick(id: String) {
+    displayClicks++
+    item("dat_display_click", JSONObject().put("id", id).put("n", displayClicks))
+    if (id == "photo") scope.launch { capturePhoto() }
   }
   @Volatile private var vLastFps = 0
 
@@ -528,10 +542,13 @@ object GlassLink {
 
   // -------------------------------------------------------------------- inputs
   private fun attachInputs(s: DeviceSession, attempt: Int = 0) {
-    // empty source set = every available source, including UNKNOWN
-    s.addInputs(InputsConfiguration(emptySet(), true)).fold(
+    // `sources` is a filter. An empty set subscribed to nothing from the Neural Band (only CAPTOUCH got through on
+    // hardware), so ask for every source explicitly. UNKNOWN is left out, matching the SDK default.
+    val cfg = InputsConfiguration(sources = InputSource.entries.filter { it != InputSource.UNKNOWN }.toSet(), consumeBack = true)
+    s.addInputs(cfg).fold(
         onSuccess = { inp ->
           inputs = inp
+          item("dat_inputs_cfg", JSONObject().put("sources", org.json.JSONArray(inp.configuration.sources.map { it.name })).put("consumeBack", inp.configuration.consumeBack))
           jobs["inputs.events"] = scope.launch { inp.events.collect { onInput(it) } }
           jobs["inputs.state"] = scope.launch { inp.state.collect { setState("inputs", it.name) } }
           jobs["inputs.err"] = scope.launch {
@@ -572,7 +589,6 @@ object GlassLink {
       is InputEvent.Drag -> o.put("type", "drag").put("action", e.action.name).put("x", e.x.toDouble()).put("y", e.y.toDouble()).put("dx", e.dx.toDouble()).put("dy", e.dy.toDouble())
       else -> o.put("type", e.javaClass.simpleName.lowercase())
     }
-    lastInputText = o.optString("dir").ifEmpty { o.optString("type") } + " (" + e.source.name.lowercase() + ")"
     item("dat_input", o)
   }
 

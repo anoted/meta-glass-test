@@ -313,22 +313,24 @@ object DatTests {
     needSession()?.let { return it }
     if (L.states.value["inputs"] == null || L.states.value["inputs"]?.contains("user") == true) L.setInputs(true)
     val steps = listOf(
+        // No touchpad single tap: during a DAT session it pauses the session (tap-and-hold stops it).
         "touch_swipe" to "Swipe forward then back on the glasses touchpad",
-        "touch_tap" to "Tap the glasses touchpad",
         "capture" to "Press the capture button (short, then long)",
         "action" to "Press the action button",
         "nb_swipe" to "Neural Band: thumb swipe left, right, up, down",
         "nb_select" to "Neural Band: index pinch (select)",
         "nb_back" to "Neural Band: middle pinch (back)",
         "nb_drag" to "Neural Band: pinch and hold, then drag",
+        "nb_display" to "Neural Band: swipe to Mark on the glasses and pinch it",
     )
     val out = JSONObject(); val seenSources = HashSet<String>(); var hits = 0
     for ((k, text) in steps) {
       check()
       prompt(text)
       val t0 = System.nanoTime()
-      val ev = collect(7000) { s, _ -> s == "dat_input" }
-      val list = ev.map { it.second }
+      // dat_display_click = a pinch/tap routed by the glasses to a button on our display card
+      val ev = collect(7000) { s, _ -> s == "dat_input" || s == "dat_display_click" }
+      val list = ev.map { it.second.let { o -> if (o.optString("s") == "dat_display_click") JSONObject(o.toString()).put("src", "DISPLAY").put("type", "click/" + o.optString("id")) else o } }
       list.forEach { seenSources.add(it.optString("src")) }
       if (list.isNotEmpty()) hits++
       val kinds = list.groupBy { "${it.optString("src")}:${it.optString("type")}${it.optString("dir").let { d -> if (d.isNotEmpty()) "/$d" else "" }}${it.optString("press").let { d -> if (d.isNotEmpty()) "/$d" else "" }}${it.optString("button").let { d -> if (d.isNotEmpty()) "/$d" else "" }}" }.mapValues { it.value.size }
