@@ -180,12 +180,14 @@ class Source:
 
 
 class Hub:
-    def __init__(self, key: str, rec_root: Path, auto_record: bool = True, idle_close_s: float = 120):
+    def __init__(self, key: str, rec_root: Path, auto_record: bool = False, idle_close_s: float = 120):
         self.key = key
         self.rec_root = rec_root
         self.sources: dict[int, Source] = {}
         self.viewers: dict[web.WebSocketResponse, int] = {}
         self.session: Session | None = None
+        # Recording starts only from the dashboard (start_rec / new_session) unless --auto-record is given.
+        self.auto_record = auto_record
         self.recording = auto_record
         self.idle_close_s = idle_close_s
         self.last_source_seen = now_ms()
@@ -296,6 +298,8 @@ class Hub:
                 self.session.flush()
                 if not self.sources and now_ms() - self.last_source_seen > self.idle_close_s * 1000:
                     await self.close_session()
+                    # All sources gone: disarm, so a later reconnect does not start a new recording on its own.
+                    self.recording = self.auto_record
             await self.to_viewers_json(self.status())
 
     def add_log(self, entry: dict):
@@ -598,7 +602,7 @@ async def index(request: web.Request):
     raise web.HTTPFound("/dashboard.html")
 
 
-def make_app(key: str, rec_root: Path = REC_ROOT, public_host: str | None = None, auto_record: bool = True, idle_close_s: float = 120) -> web.Application:
+def make_app(key: str, rec_root: Path = REC_ROOT, public_host: str | None = None, auto_record: bool = False, idle_close_s: float = 120) -> web.Application:
     app = web.Application(middlewares=[cors], client_max_size=64 << 20)
     hub = Hub(key, rec_root, auto_record=auto_record, idle_close_s=idle_close_s)
     app["hub"] = hub
@@ -635,14 +639,15 @@ def main():
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--public-host", default=None, help="public HTTPS host (default: this machine's Tailscale name)")
-    ap.add_argument("--no-auto-record", action="store_true")
+    ap.add_argument("--auto-record", action="store_true", help="start recording as soon as a source connects (default: wait for the dashboard)")
+    ap.add_argument("--no-auto-record", action="store_true", help=argparse.SUPPRESS)  # old flag; now the default
     ap.add_argument("--idle-close", type=float, default=120, help="close session after N s with no sources")
     ap.add_argument("--recordings", default=str(REC_ROOT))
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     key = load_key()
     host = args.public_host or tailscale_host()
-    app = make_app(key, Path(args.recordings), host, not args.no_auto_record, args.idle_close)
+    app = make_app(key, Path(args.recordings), host, args.auto_record, args.idle_close)
     print("\n  Meta Ray-Ban Display sensor suite")
     print(f"  dashboard (local) : http://localhost:{args.port}/")
     if host:

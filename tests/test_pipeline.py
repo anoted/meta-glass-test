@@ -47,6 +47,7 @@ def test_pipeline(tmp_path, h265):
         got = {"json": 0, "jpeg": 0, "pcm": 0}
         async def viewer():
             async with websockets.connect(f"ws://127.0.0.1:{port}/ws/view?key={KEY}", max_size=None) as v:
+                await v.send(json.dumps({"t": "srv", "op": "start_rec"}))  # recording is manual by default
                 async for m in v:
                     if isinstance(m, str):
                         got["json"] += 1
@@ -83,6 +84,29 @@ def test_pipeline(tmp_path, h265):
     assert (d / "web_capabilities.json").exists() and (d / "web_tests.jsonl").exists()
     assert (d / "report.html").stat().st_size > 5000
     assert got["json"] > 10 and got["pcm"] >= 1 and got["jpeg"] >= 1, got
+
+
+def test_no_recording_until_started(tmp_path):
+    """A source connecting must not start a recording; only the dashboard's Start does. After every source has
+    gone (idle close) the recorder disarms, so a reconnect does not record on its own either."""
+    async def main():
+        app, runner, port = await _serve(tmp_path)
+        url = f"ws://127.0.0.1:{port}/ws/ingest"
+        rec = tmp_path / "rec"
+        await sim_device.run(url, KEY, "web", 1, None)
+        await asyncio.sleep(1.0)
+        assert not any(rec.iterdir()), "recorded without Start"
+        async with websockets.connect(f"ws://127.0.0.1:{port}/ws/view?key={KEY}") as v:
+            await v.send(json.dumps({"t": "srv", "op": "start_rec"}))
+            await asyncio.sleep(0.2)
+            await sim_device.run(url, KEY, "web", 1, None)
+            await asyncio.sleep(1.5)  # idle close (0.5 s) -> disarm
+            assert len(list(rec.iterdir())) == 1
+            await sim_device.run(url, KEY, "web", 1, None)
+            await asyncio.sleep(1.0)
+            assert len(list(rec.iterdir())) == 1, "re-armed itself after idle close"
+        await runner.cleanup()
+    asyncio.run(main())
 
 
 def test_local_api_and_static(tmp_path):

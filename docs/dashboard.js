@@ -271,7 +271,7 @@ function onStats(st) {
   if (st.now) conn.viewerOffset = st.now - Date.now();
   const ses = st.session;
   $("rec-dot").className = "recdot" + (st.recording && ses ? " on" : "");
-  $("rec-name").textContent = ses ? `${ses.name} · ${fmtDur(ses.duration_s)} · ${fmtBytes(ses.bytes)}` : st.recording ? "armed: records when a source connects" : "not recording";
+  $("rec-name").textContent = ses ? `${ses.name} · ${fmtDur(ses.duration_s)} · ${fmtBytes(ses.bytes)}` : st.recording ? "armed: records when a source connects" : "not recording · press Start recording";
   $("b-rec").textContent = st.recording ? "Stop recording" : "Start recording";
   const srcs = st.sources || [];
   $("src-cards").innerHTML = ["web", "dat"].map((name) => {

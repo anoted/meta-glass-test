@@ -55,7 +55,7 @@ they may have to be enabled for your app in the Wearables Developer Center.
    *Register* → *Camera / Mic permission* → *Start session* → *Run all DAT tests*. The phone keeps streaming
    with the screen off (foreground service).
 
-Recording starts automatically when a source connects; the dashboard can start/stop sessions and drop markers.
+Nothing is recorded until you press **Start recording** on the dashboard (or start the server with `--auto-record`). Recording stops with **Stop recording**, or on its own once every source has been gone for `--idle-close` seconds (default 120); after that it stays off until you start it again. The dashboard can also start a new session and drop markers.
 
 ## Test suites
 
