@@ -10,6 +10,11 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- lets "Open Meta AI" find the Meta AI app (Android 11+ package visibility) -->
+    <queries>
+        <package android:name="com.facebook.stella" />
+    </queries>
+
     <application
         android:name=".App"
         android:allowBackup="false"

@@ -53,6 +53,19 @@ Glasses: Meta RB Display, fw build 69951180085500080 (SDK reports COMPATIBLE). P
 - Web: `emg-wrist` quaternion works, ~32 Hz (p50 dt 30 ms), nb_wrist test pass (98 deg twist span). No raw band
   gyro/accel in either API; app.js now derives wrist angular velocity (wx,wy,wz deg/s) and stores quaternions at 5 dp.
 
+## Glasses DAT app updates (phone logcat, 16:13–16:24)
+- The glasses-side app is "DevMode DWA" (`com.meta.wearable.dat.developer`, versionCode 1073534694, 4.7 MB). Meta AI
+  (v297) installs it over Wi-Fi Direct (AppHub logs). 16:13 install succeeded and the session started.
+- `Wearables.openDATGlassesAppUpdate` sends `fb-viewapp://stella/dat?action=update_dat_app…`. Meta AI only installs when
+  it thinks the glasses are behind; the server version equalled the installed one, so later taps bounced to its home
+  tab (16:23:54–16:24:08), and with Meta AI already on a settings page nothing happened (16:22). Yet the glasses kept
+  answering START_ERROR_DAT_APP_ON_THE_GLASSES_UPDATE_REQUIRED.
+- The glasses never disconnected between the working 16:13 session and the 16:22 failure. Each failure streak began
+  after the phone app process restarted (15:50 reinstall, 16:22 relaunch). Unconfirmed; to test, force-stop and
+  reopen the app right after a working session.
+- The update button now opens a dialog: try the SDK link, or "Open Meta AI" (fresh task) and use
+  App connections → Developer mode apps → Install.
+
 Neural Band inputs available (per SDK 1.0.1 + Web Apps docs):
 - DAT: Nav UP/DOWN/LEFT/RIGHT, Select, Back (source NEURAL_BAND), Drag DOWN/MOVE/UP with x,y,dx,dy
   (NEURAL_BAND_DRAG), display button onClick; Motion source enum has NEURAL_BAND (not observed yet).

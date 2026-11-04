@@ -118,6 +118,37 @@ class MainActivity : ComponentActivity() {
   }
 
   private fun fix(f: GlassLink.Fix) {
+    if (f == GlassLink.Fix.DAT_APP_UPDATE) { datUpdateDialog(); return }
+    openFix(f)
+  }
+
+  /** Meta AI's update link (fb-viewapp://stella/dat?action=update_dat_app…) installs the glasses-side "DevMode DWA"
+   *  only when Meta AI thinks the glasses are behind. When its server version equals the one it last installed it
+   *  just bounces to its home tab, and if Meta AI is already open on a settings page it may not navigate at all
+   *  (both seen on hardware, 2026-11-04). The Developer Mode page always offers the install, so show that path too. */
+  private fun datUpdateDialog() {
+    android.app.AlertDialog.Builder(this)
+        .setTitle("Update the DAT app on the glasses")
+        .setMessage(
+            "1. \"Open update link\" asks Meta AI to install it. This only works when Meta AI thinks the glasses are behind. " +
+                "If Meta AI just shows its home screen, use step 2.\n\n" +
+                "2. In Meta AI open Settings → App connections → Developer mode apps (or Settings → App info → Developer Mode) " +
+                "and press Install / Update for this app. \"Open Meta AI\" starts it fresh on its home screen.\n\n" +
+                "Keep the glasses on, unfolded and above 10% battery. The install takes about 10 s over Wi-Fi, then start the session again.")
+        .setPositiveButton("Open update link") { _, _ -> GlassLink.log("dat update: SDK link"); openFix(GlassLink.Fix.DAT_APP_UPDATE) }
+        .setNeutralButton("Open Meta AI") { _, _ -> GlassLink.log("dat update: open Meta AI fresh"); openMetaAiFresh() }
+        .setNegativeButton("Cancel", null)
+        .show()
+  }
+
+  private fun openMetaAiFresh() {
+    val i = packageManager.getLaunchIntentForPackage("com.facebook.stella")
+    if (i == null) { toast("Meta AI app not found"); return }
+    // CLEAR_TASK drops whatever settings screen Meta AI was left on, so it starts at home.
+    startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+  }
+
+  private fun openFix(f: GlassLink.Fix) {
     val r = when (f) {
       GlassLink.Fix.DAT_APP_UPDATE -> Wearables.openDATGlassesAppUpdate(this)
       GlassLink.Fix.FIRMWARE_UPDATE -> Wearables.openFirmwareUpdate(this)
